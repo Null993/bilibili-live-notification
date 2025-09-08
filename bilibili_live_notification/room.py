@@ -1,5 +1,5 @@
 # -*- coding=UTF-8 -*-
-"""live room operations.  """
+"""live room operations."""
 
 import asyncio
 import aiohttp.client_exceptions
@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from typing import Dict, Tuple
 
-from bilibili_api import live
+from bilibili_api import live, ResponseCodeException
 
 from . import config, rate_limit
 
@@ -74,6 +74,21 @@ async def get(rid: str, *, max_age_secs: float = 3600) -> dict:
             )
             await asyncio.sleep(0)
             return await get(rid, max_age_secs=max_age_secs)
+        except ResponseCodeException as ex:
+            if ex.code == -352:
+                # 风控
+                outdated = _CACHE.get(rid)
+                if outdated:
+                    return outdated[1]
+                return dict(
+                    name="直播间 %d" % rid,
+                    title="!接口风控，无法获取!",
+                    url="https://bilibili.com",
+                    data={},
+                    popularity=-1,
+                )
+            else:
+                raise
 
     _, ret = _CACHE[rid]
     ret["popularity"] = ROOM_POPUPARITY[rid]
