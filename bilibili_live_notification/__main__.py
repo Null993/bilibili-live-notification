@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from typing import Dict, Tuple
 
-from bilibili_api import live, select_client
+from bilibili_api import live, ResponseCodeException
 
 
 from . import config, emailtools, room, webhook, rate_limit
@@ -224,6 +224,12 @@ async def _poll(id: str, interval_secs: int) -> None:
                 )
             last_title = title
             last_is_live = is_live
+        except ResponseCodeException as ex:
+            if ex.code == -352:
+                # 风控
+                await asyncio.sleep(3600)
+            else:
+                raise
         except:
             logging.exception("error during polling")
         await asyncio.sleep(interval_secs)
