@@ -1,4 +1,6 @@
-"""application config. """
+"""application config."""
+
+import json
 import os
 from datetime import datetime
 from typing import Iterator, Optional, Tuple
@@ -25,7 +27,10 @@ def get(name: str, data: Optional[dict] = None) -> str:
     var_prefix = "TEMPLATE_VAR_"
     if name.startswith(var_prefix):
         return value
-    return jinja2.Template(value, undefined=_ChainableDebugUndefined,).render(
+    return jinja2.Template(
+        value,
+        undefined=_ChainableDebugUndefined,
+    ).render(
         **{
             **dict(datetime=datetime),
             **dict(get_items(var_prefix, data)),
@@ -79,6 +84,42 @@ EMAIL_TO = parse_csv(get("EMAIL_TO"))
 TEST_EMAIL_TO = parse_csv(get("TEST_EMAIL_TO"))
 BILIBILI_EMAIL_THROTTLE = int(get("BILIBILI_EMAIL_THROTTLE") or "600")
 POLLING_INTERVAL_SECS = int(get("BILIBILI_POLLING_INTERVAL_SECS") or "0")
+POLLING_CONFIRMATIONS = max(1, int(get("BILIBILI_POLLING_CONFIRMATIONS") or "2"))
+NOTIFY_ON_INITIAL_LIVE = get("BILIBILI_NOTIFY_ON_INITIAL_LIVE").lower() == "true"
+STATE_DB_PATH = get("STATE_DB_PATH") or "/data/state.db"
+APPRISE_EVENTS = set(get_csv("APPRISE_EVENTS") or ["LIVE", "PREPARING"])
+
+
+def get_apprise_urls() -> list:
+    """Return Apprise URLs without forcing secrets into one CSV value.
+
+    APPRISE_URLS accepts a JSON array or one URL per line. Numbered variables
+    (APPRISE_URL_1, APPRISE_URL_2, ...) are also supported and are convenient
+    in NAS container UIs.
+    """
+
+    value = os.getenv("APPRISE_URLS", "").strip()
+    urls = []
+    if value:
+        if value.startswith("["):
+            parsed = json.loads(value)
+            if not isinstance(parsed, list):
+                raise ValueError("APPRISE_URLS JSON value must be an array")
+            urls.extend(str(item).strip() for item in parsed)
+        else:
+            urls.extend(line.strip() for line in value.splitlines())
+
+    numbered = sorted(
+        (
+            (int(name[len("APPRISE_URL_") :]), raw_value.strip())
+            for name, raw_value in os.environ.items()
+            if name.startswith("APPRISE_URL_") and name[len("APPRISE_URL_") :].isdigit()
+        ),
+        key=lambda item: item[0],
+    )
+    urls.extend(value for _, value in numbered)
+    return [url for url in urls if url]
+
 
 def discover_bilibili_room_id() -> Iterator[str]:
     """get room id from env vars that has BILIBILI_ROOM_NAME_ prefix
