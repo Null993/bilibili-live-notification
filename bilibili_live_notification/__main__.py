@@ -11,7 +11,7 @@ from typing import Dict, Tuple
 from bilibili_api import live, ResponseCodeException
 
 
-from . import config, emailtools, room, webhook, rate_limit
+from . import apprise_notify, config, emailtools, rate_limit, room, state, webhook
 
 from collections import defaultdict, OrderedDict
 
@@ -21,6 +21,48 @@ def _format_time(v: datetime) -> str:
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _StatusConfirmation:
+    """Require repeated observations before accepting a polling transition."""
+
+    def __init__(self, current: bool, confirmations: int):
+        self.current = current
+        self.confirmations = max(1, confirmations)
+        self._candidate = current
+        self._count = 0
+
+    def observe(self, value: bool) -> bool:
+        if value == self.current:
+            self._candidate = value
+            self._count = 0
+            return False
+        if value != self._candidate:
+            self._candidate = value
+            self._count = 1
+        else:
+            self._count += 1
+        if self._count < self.confirmations:
+            return False
+        self.current = value
+        self._count = 0
+        return True
+
+
+def _make_status_event(room_id: str, is_live: bool) -> dict:
+    now = int(time.time())
+    event_type = "LIVE" if is_live else "PREPARING"
+    return {
+        "room_display_id": room_id,
+        "room_real_id": int(room_id),
+        "type": event_type,
+        "data": {
+            "cmd": event_type,
+            "roomid": int(room_id),
+            "send_time": now,
+            "source": "polling",
+        },
+    }
 
 
 async def _handle_live(event):
@@ -118,6 +160,20 @@ async def _handle_event(event, *, skip_room_data_update=False):
     event_type = event["type"]
     rid = str(event["room_display_id"])
 
+    desired_live_state = None
+    if event_type == "LIVE":
+        desired_live_state = True
+    elif event_type == "PREPARING":
+        desired_live_state = False
+
+    # Persistent state is the common deduplication point for websocket and
+    # polling. This also prevents a container restart from re-sending LIVE.
+    if desired_live_state is not None:
+        previous = state.get(rid)
+        if previous is not None and previous.is_live == desired_live_state:
+            LOGGER.info("skip unchanged room state: %s: %s", rid, event_type)
+            return
+
     if event_type == "LIVE":
         LOGGER.info(event)
     else:
@@ -125,7 +181,9 @@ async def _handle_event(event, *, skip_room_data_update=False):
 
     _collect_event_example(event)
 
-    if _throttle_event(event):
+    # State transitions must not be throttled: a short stream followed by a
+    # restart inside the old 10-minute LIVE window is still a real transition.
+    if desired_live_state is None and _throttle_event(event):
         return
 
     # update room data cache
@@ -149,6 +207,7 @@ async def _handle_event(event, *, skip_room_data_update=False):
     if _distinct_event(event, data):
         return
 
+    await apprise_notify.trigger(event_type, data)
     await webhook.trigger_many(
         (
             config.get_csv(f"BILIBILI_ROOM_WEBHOOK_{rid}_{event_type}")
@@ -156,6 +215,11 @@ async def _handle_event(event, *, skip_room_data_update=False):
         ),
         data,
     )
+
+    if desired_live_state is not None:
+        state.save(rid, desired_live_state, room_data.get("title", ""))
+    elif event_type == "ROOM_CHANGE":
+        state.update_title(rid, room_data.get("title", ""))
 
 
 async def _subscribe(id: str) -> None:
@@ -169,8 +233,9 @@ async def _subscribe(id: str) -> None:
 
 
 async def _poll(id: str, interval_secs: int) -> None:
-    last_is_live = False
-    last_title = ""
+    persisted = state.get(id)
+    tracker = None
+    last_title = persisted.title if persisted else ""
     while True:
         await asyncio.sleep(0)
         try:
@@ -178,27 +243,24 @@ async def _poll(id: str, interval_secs: int) -> None:
             ri = data["data"]["room_info"]
             is_live = ri["live_status"] == 1
             title = ri["title"]
-            if is_live and not last_is_live:
-                now = int(time.time())
+            if tracker is None:
+                if persisted is None:
+                    if is_live and config.NOTIFY_ON_INITIAL_LIVE:
+                        await _handle_event(
+                            _make_status_event(id, True),
+                            skip_room_data_update=True,
+                        )
+                    else:
+                        state.save(id, is_live, title)
+                    tracker = _StatusConfirmation(is_live, config.POLLING_CONFIRMATIONS)
+                else:
+                    tracker = _StatusConfirmation(
+                        persisted.is_live, config.POLLING_CONFIRMATIONS
+                    )
+
+            if tracker.observe(is_live):
                 await _handle_event(
-                    {
-                        "room_display_id": id,
-                        "room_real_id": int(id),
-                        "type": "LIVE",
-                        "data": {
-                            "cmd": "LIVE",
-                            "is_report": False,
-                            "live_key": "",
-                            "live_model": 0,
-                            "live_platform": "",
-                            "live_time": now,
-                            "msg_id": "polling-based-live-%s" % (now,),
-                            "roomid": int(id),
-                            "send_time": now,
-                            "sub_session_key": "",
-                            "voice_background": "",
-                        },
-                    },
+                    _make_status_event(id, is_live),
                     skip_room_data_update=True,
                 )
             elif last_title and title != last_title:
@@ -223,7 +285,6 @@ async def _poll(id: str, interval_secs: int) -> None:
                     skip_room_data_update=True,
                 )
             last_title = title
-            last_is_live = is_live
         except ResponseCodeException as ex:
             if ex.code == -352:
                 # 风控
@@ -247,12 +308,21 @@ async def main():
         )
     )
     debug_logger_names = config.get_csv("DEBUG")
-    for logger in [LOGGER, webhook._LOGGER, room.LOGGER]:
+    for logger in [
+        LOGGER,
+        apprise_notify.LOGGER,
+        state.LOGGER,
+        webhook._LOGGER,
+        room.LOGGER,
+    ]:
         logger.setLevel(
             logging.DEBUG if logger.name in debug_logger_names else logging.INFO
         )
         logger.addHandler(handler)
 
+    state.initialize()
+    # Validate and report Apprise configuration during startup.
+    apprise_notify._instance()
     await webhook.trigger_many(config.get_csv("SERVER_WEBHOOK_START"))
     if config.TEST_EMAIL_TO:
         LOGGER.info("发送测试邮件")

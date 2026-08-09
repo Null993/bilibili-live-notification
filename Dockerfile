@@ -34,4 +34,7 @@ COPY ./ ./
 
 # https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
 ENV TZ=CST-8
+ENV STATE_DB_PATH=/data/state.db
+RUN mkdir -p /data
+VOLUME [ "/data" ]
 CMD [ "python3", "-m", "bilibili_live_notification" ]

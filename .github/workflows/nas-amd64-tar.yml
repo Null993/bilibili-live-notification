@@ -1,0 +1,72 @@
+name: NAS amd64 image tar
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/nas-apprise
+    paths-ignore:
+      - "**.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nas-amd64-tar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r dev-requirements.txt
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Check formatting
+        run: >-
+          python -m black -t py312 --check
+          bilibili_live_notification/__main__.py
+          bilibili_live_notification/config.py
+          bilibili_live_notification/apprise_notify.py
+          bilibili_live_notification/state.py
+          tests
+
+  build-amd64-tar:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build linux/amd64 Docker image tar
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          tags: bilibili-live-notification-apprise:latest
+          outputs: type=docker,dest=${{ runner.temp }}/bilibili-live-notification-apprise-amd64.tar
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Generate checksum
+        shell: bash
+        run: >-
+          sha256sum
+          "${{ runner.temp }}/bilibili-live-notification-apprise-amd64.tar"
+          > "${{ runner.temp }}/bilibili-live-notification-apprise-amd64.tar.sha256"
+      - name: Upload NAS image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilibili-live-notification-apprise-amd64
+          path: |
+            ${{ runner.temp }}/bilibili-live-notification-apprise-amd64.tar
+            ${{ runner.temp }}/bilibili-live-notification-apprise-amd64.tar.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

@@ -1,5 +1,8 @@
 # B 站直播提醒
 
+> 本分支已增加 Apprise、下播轮询补偿、SQLite 状态持久化以及 x86 NAS
+> 镜像 tar 打包支持。部署说明请查看 [README_NAS.md](./README_NAS.md)。
+
 [![docker](https://github.com/NateScarlet/bilibili-live-notification/workflows/docker/badge.svg)](https://github.com/NateScarlet/bilibili-live-notification/actions)
 
 在指定房间开播时发送邮件通知。
