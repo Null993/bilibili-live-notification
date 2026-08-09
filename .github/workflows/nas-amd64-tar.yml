@@ -35,6 +35,7 @@ jobs:
           bilibili_live_notification/__main__.py
           bilibili_live_notification/config.py
           bilibili_live_notification/apprise_notify.py
+          bilibili_live_notification/bootstrap.py
           bilibili_live_notification/state.py
           tests
 

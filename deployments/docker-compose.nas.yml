@@ -3,10 +3,9 @@ services:
     image: bilibili-live-notification-apprise:latest
     container_name: bilibili-live-notification
     restart: unless-stopped
-    env_file:
-      - ./.env
     environment:
       TZ: Asia/Shanghai
       STATE_DB_PATH: /data/state.db
+      ENV_FILE_PATH: /data/.env
     volumes:
       - ./data:/data

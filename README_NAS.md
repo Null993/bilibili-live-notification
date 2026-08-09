@@ -6,19 +6,28 @@
 - SQLite 状态持久化，容器重启后不会把已有直播重复当作新开播；
 - 连续状态确认，降低接口瞬时异常导致的误报；
 - 内置 Apprise，可配置邮件、企业微信机器人及其他通知服务；
+- 首次启动在状态数据库同目录生成 `.env`，默认监控直播间 `22747736`；
 - Linux `amd64` 镜像构建和 `.tar` 导出脚本。
 
 ## 生成 NAS 配置
 
-复制以下两个文件到同一部署目录：
+复制 Compose 文件到部署目录：
 
 ```text
 deployments/docker-compose.nas.yml  -> docker-compose.yml
-deployments/.env.nas.example        -> .env
 ```
 
-编辑 `.env`，至少设置一个 `BILIBILI_ROOM_NAME_<直播间号>` 和一个
-`APPRISE_URL_<序号>`。状态数据库保存在部署目录的 `data/state.db`。
+容器首次启动会在部署目录自动生成：
+
+```text
+data/state.db
+data/.env
+```
+
+默认 `.env` 监控直播间 `22747736`。需要修改直播间或增加通知渠道时，编辑
+`data/.env` 后重启容器。也可以在首次启动前将
+`deployments/.env.nas.example` 复制为 `data/.env`。容器管理界面中直接设置的
+环境变量优先于该文件。
 
 企业微信群机器人只需配置：
 

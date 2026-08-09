@@ -10,6 +10,9 @@ from typing import Dict, Tuple
 
 from bilibili_api import live, ResponseCodeException
 
+from .bootstrap import ensure_and_load_env
+
+BOOTSTRAP_RESULT = ensure_and_load_env()
 
 from . import apprise_notify, config, emailtools, rate_limit, room, state, webhook
 
@@ -321,6 +324,12 @@ async def main():
         logger.addHandler(handler)
 
     state.initialize()
+    LOGGER.info(
+        "%s environment file: %s (%d value(s) loaded)",
+        "created" if BOOTSTRAP_RESULT.created else "loaded",
+        BOOTSTRAP_RESULT.path,
+        BOOTSTRAP_RESULT.loaded,
+    )
     # Validate and report Apprise configuration during startup.
     apprise_notify._instance()
     await webhook.trigger_many(config.get_csv("SERVER_WEBHOOK_START"))
