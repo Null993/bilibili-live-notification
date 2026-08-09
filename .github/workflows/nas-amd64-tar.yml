@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - agent/nas-apprise
+      - master
     paths-ignore:
       - "**.md"
 
