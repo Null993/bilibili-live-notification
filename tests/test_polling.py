@@ -1,4 +1,5 @@
 import importlib
+import asyncio
 
 import pytest
 
@@ -55,6 +56,9 @@ async def test_persistent_state_deduplicates_websocket_and_polling(
 
     async def fake_apprise(event_type, data):
         notifications.append(event_type)
+        # Make the websocket/polling race deterministic. Without the per-room
+        # lock both handlers pass the SQLite check before either one saves.
+        await asyncio.sleep(0.02)
 
     async def fake_webhooks(names, data=None):
         return None
@@ -67,10 +71,13 @@ async def test_persistent_state_deduplicates_websocket_and_polling(
     monkeypatch.setattr(app.apprise_notify, "trigger", fake_apprise)
     monkeypatch.setattr(app.webhook, "trigger_many", fake_webhooks)
     monkeypatch.setattr(app, "_handle_live", fake_live_email)
+    app.ROOM_STATE_LOCKS.clear()
 
     live_event = _make_status_event("123", True)
-    await app._handle_event(live_event, skip_room_data_update=True)
-    await app._handle_event(live_event, skip_room_data_update=True)
+    await asyncio.gather(
+        app._handle_event(live_event, skip_room_data_update=True),
+        app._handle_event(live_event, skip_room_data_update=True),
+    )
     await app._handle_event(
         _make_status_event("123", False), skip_room_data_update=True
     )

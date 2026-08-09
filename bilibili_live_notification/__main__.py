@@ -131,6 +131,7 @@ def _throttle_event(event) -> bool:
 
 
 ROOM_EVENT_TYPE_KEYS = defaultdict(lambda: defaultdict(OrderedDict))
+ROOM_STATE_LOCKS = defaultdict(asyncio.Lock)
 
 
 def _distinct_event(event, data: dict) -> bool:
@@ -160,6 +161,19 @@ def _distinct_event(event, data: dict) -> bool:
 
 
 async def _handle_event(event, *, skip_room_data_update=False):
+    event_type = event["type"]
+    rid = str(event["room_display_id"])
+    if event_type in ("LIVE", "PREPARING", "ROOM_CHANGE"):
+        async with ROOM_STATE_LOCKS[rid]:
+            return await _handle_event_serialized(
+                event, skip_room_data_update=skip_room_data_update
+            )
+    return await _handle_event_serialized(
+        event, skip_room_data_update=skip_room_data_update
+    )
+
+
+async def _handle_event_serialized(event, *, skip_room_data_update=False):
     event_type = event["type"]
     rid = str(event["room_display_id"])
 
