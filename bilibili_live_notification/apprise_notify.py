@@ -61,13 +61,25 @@ async def trigger(event_type: str, data: dict) -> None:
         _LOCK = asyncio.Lock()
     async with _LOCK:
         try:
-            success = await asyncio.to_thread(
-                instance.notify,
-                title=title,
-                body=body,
-                notify_type=apprise.NotifyType.INFO,
+            LOGGER.info("sending Apprise notification: event=%s", event_type)
+            success = await asyncio.wait_for(
+                asyncio.to_thread(
+                    instance.notify,
+                    title=title,
+                    body=body,
+                    notify_type=apprise.NotifyType.INFO,
+                ),
+                timeout=config.APPRISE_TIMEOUT_SECS,
             )
             if not success:
                 LOGGER.error("one or more Apprise targets rejected %s", event_type)
+            else:
+                LOGGER.info("Apprise notification accepted: event=%s", event_type)
+        except TimeoutError:
+            LOGGER.error(
+                "Apprise notification timed out after %.1fs: %s",
+                config.APPRISE_TIMEOUT_SECS,
+                event_type,
+            )
         except Exception:
             LOGGER.exception("Apprise notification failed: %s", event_type)

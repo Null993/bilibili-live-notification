@@ -7,5 +7,6 @@ services:
       TZ: Asia/Shanghai
       STATE_DB_PATH: /data/state.db
       ENV_FILE_PATH: /data/.env
+      LOG_DIR: /data/logs
     volumes:
       - ./data:/data

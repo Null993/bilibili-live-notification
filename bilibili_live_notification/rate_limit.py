@@ -1,6 +1,5 @@
 # -*- coding=UTF-8 -*-
-"""Limit operation rate.  """
-
+"""Limit operation rate."""
 
 import asyncio
 import contextvars
@@ -24,11 +23,14 @@ class RateLimiter:
             n (int, optional): number. Defaults to 1.
         """
         async with self.mu:
-            self._update_allowance()
-            while self.allowance < n:
-                await asyncio.sleep(0)
+            while True:
                 self._update_allowance()
-            self.allowance -= n
+                if self.allowance >= n:
+                    self.allowance -= n
+                    return
+                # Sleeping for the missing allowance avoids a CPU-heavy busy
+                # loop and naturally spaces Bilibili API calls.
+                await asyncio.sleep((n - self.allowance) / self.rate)
 
     def _update_allowance(self):
         now = time.time()

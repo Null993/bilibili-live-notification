@@ -14,7 +14,16 @@ from .bootstrap import ensure_and_load_env
 
 BOOTSTRAP_RESULT = ensure_and_load_env()
 
-from . import apprise_notify, config, emailtools, rate_limit, room, state, webhook
+from . import (
+    apprise_notify,
+    config,
+    emailtools,
+    logging_config,
+    rate_limit,
+    room,
+    state,
+    webhook,
+)
 
 from collections import defaultdict, OrderedDict
 
@@ -257,6 +266,10 @@ async def _poll(id: str, interval_secs: int) -> None:
         await asyncio.sleep(0)
         try:
             data = await room.get(id, max_age_secs=0)
+            if data.get("_stale"):
+                LOGGER.warning("polling skipped stale room data: id=%s", id)
+                await asyncio.sleep(interval_secs)
+                continue
             ri = data["data"]["room_info"]
             is_live = ri["live_status"] == 1
             title = ri["title"]
@@ -308,34 +321,21 @@ async def _poll(id: str, interval_secs: int) -> None:
                 await asyncio.sleep(3600)
             else:
                 raise
-        except:
-            logging.exception("error during polling")
+        except room.FetchUnavailable as ex:
+            LOGGER.error("polling has no usable room data: id=%s error=%s", id, ex)
+        except Exception:
+            LOGGER.exception("error during polling: id=%s", id)
         await asyncio.sleep(interval_secs)
 
 
 async def main():
     os.environ.setdefault("BILIBILI_EVENT_THROTTLE_LIVE", "600")
-    rate_limit.BILIBILI_API.set(rate_limit.RateLimiter(50, 1))
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter(
-            "%(levelname)-6s[%(asctime)s]:%(name)s:%(lineno)d: %(message)s",
-            "%Y-%m-%d %H:%M:%S",
+    rate_limit.BILIBILI_API.set(
+        rate_limit.RateLimiter(
+            config.API_RATE_LIMIT_BURST, config.API_RATE_LIMIT_PER_SECOND
         )
     )
-    debug_logger_names = config.get_csv("DEBUG")
-    for logger in [
-        LOGGER,
-        apprise_notify.LOGGER,
-        state.LOGGER,
-        webhook._LOGGER,
-        room.LOGGER,
-    ]:
-        logger.setLevel(
-            logging.DEBUG if logger.name in debug_logger_names else logging.INFO
-        )
-        logger.addHandler(handler)
+    log_path = logging_config.configure()
 
     state.initialize()
     LOGGER.info(
@@ -343,6 +343,11 @@ async def main():
         "created" if BOOTSTRAP_RESULT.created else "loaded",
         BOOTSTRAP_RESULT.path,
         BOOTSTRAP_RESULT.loaded,
+    )
+    LOGGER.info(
+        "daily logging ready: %s (retention=%d days)",
+        log_path,
+        config.LOG_RETENTION_DAYS,
     )
     # Validate and report Apprise configuration during startup.
     apprise_notify._instance()

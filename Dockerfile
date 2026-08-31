@@ -36,6 +36,7 @@ COPY ./ ./
 ENV TZ=CST-8
 ENV STATE_DB_PATH=/data/state.db
 ENV ENV_FILE_PATH=/data/.env
-RUN mkdir -p /data
+ENV LOG_DIR=/data/logs
+RUN mkdir -p /data/logs
 VOLUME [ "/data" ]
 CMD [ "python3", "-m", "bilibili_live_notification" ]

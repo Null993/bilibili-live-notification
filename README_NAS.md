@@ -22,6 +22,7 @@ deployments/docker-compose.nas.yml  -> docker-compose.yml
 ```text
 data/state.db
 data/.env
+data/logs/bilibili-live-notification.log
 ```
 
 默认 `.env` 监控直播间 `22747736`。需要修改直播间或增加通知渠道时，编辑
@@ -113,3 +114,31 @@ bilibili-live-notification-apprise:latest
   `BILIBILI_NOTIFY_ON_INITIAL_LIVE=true` 可改变该行为。
 
 建议轮询间隔设置为 60～120 秒，不要过度请求 B 站接口。
+
+## 接口保护与日志
+
+默认情况下，房间信息请求 15 秒超时，失败后最多尝试 3 次并指数退避；B站
+返回 `-352` 风控后，所有房间的接口刷新会冷却 30 分钟，期间只使用已有缓存，
+不会把缓存状态当作新的开播或下播。请求速率默认限制为每秒 1 次、突发 2 次。
+可在 `data/.env` 中调整：
+
+```env
+BILIBILI_API_TIMEOUT_SECS=15
+BILIBILI_API_RETRY_ATTEMPTS=3
+BILIBILI_API_RETRY_BASE_SECS=2
+BILIBILI_API_RETRY_MAX_SECS=30
+BILIBILI_API_RISK_COOLDOWN_SECS=1800
+BILIBILI_API_RATE_LIMIT_BURST=2
+BILIBILI_API_RATE_LIMIT_PER_SECOND=1
+```
+
+应用日志同时输出到容器控制台和 `/data/logs`。文件每天午夜轮转，默认最多保留
+当天及此前 6 天，共 7 天：
+
+```env
+LOG_DIR=/data/logs
+LOG_RETENTION_DAYS=7
+```
+
+通知发送会记录“开始、服务接受或失败”，但不会把通知 URL、密码或机器人 Key
+写入日志。Docker 自己的容器控制台日志轮转仍需在 NAS 的容器管理器中单独设置。
