@@ -132,7 +132,11 @@ def get_apprise_urls() -> list:
         key=lambda item: item[0],
     )
     urls.extend(value for _, value in numbered)
-    return [url for url in urls if url]
+
+    # The same targets are sometimes configured both in APPRISE_URLS and in
+    # numbered variables by NAS container UIs. Apprise treats every entry as a
+    # separate target, so preserve order while removing exact duplicates.
+    return list(dict.fromkeys(url for url in urls if url))
 
 
 def discover_bilibili_room_id() -> Iterator[str]:

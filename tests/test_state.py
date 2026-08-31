@@ -33,3 +33,18 @@ def test_update_title_preserves_live_state(tmp_path, monkeypatch):
     assert current is not None
     assert current.is_live is True
     assert current.title == "new"
+
+
+def test_claim_transition_only_accepts_changed_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "state.db"))
+    state.initialize()
+
+    assert state.claim_transition("123", True, "live") is True
+    assert state.claim_transition("123", True, "duplicate") is False
+    assert state.claim_transition("123", False, "offline") is True
+    assert state.claim_transition("123", False, "duplicate") is False
+
+    current = state.get("123")
+    assert current is not None
+    assert current.is_live is False
+    assert current.title == "offline"

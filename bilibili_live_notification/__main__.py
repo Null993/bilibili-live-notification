@@ -200,7 +200,7 @@ async def _handle_event_serialized(event, *, skip_room_data_update=False):
             LOGGER.info("skip unchanged room state: %s: %s", rid, event_type)
             return
 
-    if event_type == "LIVE":
+    if desired_live_state is not None:
         LOGGER.info(event)
     else:
         LOGGER.debug(event)
@@ -216,12 +216,22 @@ async def _handle_event_serialized(event, *, skip_room_data_update=False):
     if not skip_room_data_update and event_type in ("LIVE", "PREPARING", "ROOM_CHANGE"):
         room_data = await room.get(rid, max_age_secs=0)
 
+    room_data = await room.get(rid)
+
+    # This database transaction is the final deduplication gate. The asyncio
+    # lock above handles tasks in this process; claim_transition also handles
+    # two containers/processes sharing /data/state.db.
+    if desired_live_state is not None and not state.claim_transition(
+        rid, desired_live_state, room_data.get("title", "")
+    ):
+        LOGGER.info("skip concurrently claimed room state: %s: %s", rid, event_type)
+        return
+
     if event_type == "LIVE":
         await _handle_live(event)
     elif event_type == "VIEW":
         await _handle_view(event)
 
-    room_data = await room.get(rid)
     data = {
         **dict(
             event=event,
@@ -242,9 +252,7 @@ async def _handle_event_serialized(event, *, skip_room_data_update=False):
         data,
     )
 
-    if desired_live_state is not None:
-        state.save(rid, desired_live_state, room_data.get("title", ""))
-    elif event_type == "ROOM_CHANGE":
+    if event_type == "ROOM_CHANGE":
         state.update_title(rid, room_data.get("title", ""))
 
 

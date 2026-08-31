@@ -65,6 +65,39 @@ def save(room_id: str, is_live: bool, title: str = "") -> None:
         connection.commit()
 
 
+def claim_transition(room_id: str, is_live: bool, title: str = "") -> bool:
+    """Atomically persist a changed state and return whether this caller won.
+
+    The transaction closes the gap between a state read and write. This makes
+    websocket/polling races safe across processes or containers that share the
+    same state database, not only within one asyncio event loop.
+    """
+
+    room_id = str(room_id)
+    now = int(time.time())
+    with sqlite3.connect(config.STATE_DB_PATH, timeout=30) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT is_live FROM room_state WHERE room_id = ?", (room_id,)
+        ).fetchone()
+        if row is not None and bool(row[0]) == bool(is_live):
+            connection.rollback()
+            return False
+        connection.execute(
+            """
+            INSERT INTO room_state(room_id, is_live, title, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(room_id) DO UPDATE SET
+                is_live = excluded.is_live,
+                title = excluded.title,
+                updated_at = excluded.updated_at
+            """,
+            (room_id, int(is_live), title, now),
+        )
+        connection.commit()
+    return True
+
+
 def update_title(room_id: str, title: str) -> None:
     previous = get(room_id)
     if previous is not None:

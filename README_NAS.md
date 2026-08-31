@@ -142,3 +142,20 @@ LOG_RETENTION_DAYS=7
 
 通知发送会记录“开始、服务接受或失败”，但不会把通知 URL、密码或机器人 Key
 写入日志。Docker 自己的容器控制台日志轮转仍需在 NAS 的容器管理器中单独设置。
+
+## 重复通知排查
+
+程序会自动去除 `APPRISE_URLS` 和 `APPRISE_URL_n` 中完全相同的通知 URL；直播
+状态变化还会通过 SQLite 原子认领，长连接、轮询以及共享同一 `state.db` 的多个
+进程不会重复发送。
+
+如果邮件和企业微信仍同时收到两份，请在 NAS 上检查是否运行了两个使用不同
+数据目录的旧、新容器。不同数据库之间无法互相去重：
+
+```sh
+docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}'
+```
+
+应只保留一个 `bilibili-live-notification` 实例，并确认它挂载的是预期的
+`/data/state.db`。启动日志中的 `configured N Apprise notification target(s)`
+也应与实际配置的渠道数量一致；当前邮件加企业微信通常应显示 `2`。
